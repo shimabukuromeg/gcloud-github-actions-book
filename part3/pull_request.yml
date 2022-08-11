@@ -1,0 +1,78 @@
+name: Publish to Cloud Storage
+on:
+  pull_request:
+    types: ['opened', 'reopened', 'synchronize']
+jobs:
+  main:
+    permissions:
+      id-token: 'write'
+      contents: 'read'
+    runs-on: ubuntu-latest
+    env:
+      GCLOUD_PROJECT_ID: '（プロジェクトID）'
+      GCLOUD_WORKLOAD_IDENTITY: '（Workload Identity 連携）'
+      GCLOUD_LB_NAME: 'github-books-lb'
+      BASE_DOMAIN: 'storage.（ドメイン名）'
+      BASE_BUCKET: '（加工ドメイン名）'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        path: './src'
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Get branch name
+      id: branch-name
+      uses: tj-actions/branch-names@v5
+
+    - name: Set target bucket and target domain
+      run: |
+        echo 'TARGET_DOMAIN=${{ steps.branch-name.outputs.current_branch }}.${{ env.BASE_DOMAIN }}' >> $GITHUB_ENV
+        echo 'TARGET_BUCKET=${{ steps.branch-name.outputs.current_branch }}-${{ env.BASE_BUCKET }}' >> $GITHUB_ENV
+
+    - id: auth
+      name: Set up GoogleCloud Authorization
+      uses: google-github-actions/auth@v0
+      with:
+        token_format: 'access_token'
+        workload_identity_provider: ${{ env.GCLOUD_WORKLOAD_IDENTITY }}
+        service_account: 'github-actions@${{ env.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com'
+        access_token_lifetime: '300s'
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v0
+
+    - name: Set up CloudStorage
+      if: ${{ github.event.action != 'synchronize' }}
+      run: |
+        curl --request POST \
+          'https://storage.googleapis.com/storage/v1/b?project=${{ env.GCLOUD_PROJECT_ID }}' \
+          --header 'Authorization: Bearer ${{ steps.auth.outputs.access_token }}' \
+          --header 'Content-Type: application/json' \
+          --data '{"name":"${{ env.TARGET_BUCKET }}","location":"asia-northeast1","website":{"mainPageSuffix":"index.html"}}'
+        curl --request PUT \
+          'https://storage.googleapis.com/storage/v1/b/${{ env.TARGET_BUCKET }}/iam' \
+          --header 'Authorization: Bearer ${{ steps.auth.outputs.access_token }}' \
+          --header 'Content-Type: application/json' \
+          --data '{"bindings":[{"members":["allUsers"],"role":"roles/storage.objectViewer"},{"members":["projectOwner:${{ env.GCLOUD_PROJECT_ID }}","projectEditor:${{ env.GCLOUD_PROJECT_ID }}"],"role":"roles/storage.admin"},{"members":["projectViewer:${{ env.GCLOUD_PROJECT_ID }}"],"role":"roles/storage.objectViewer"}]}'
+
+    - name: Add Backend Buckets and URL maps
+      if: ${{ github.event.action != 'synchronize' }}
+      run: |
+        gcloud compute backend-buckets create ${{ env.TARGET_BUCKET }}-backend --gcs-bucket-name=${{ env.TARGET_BUCKET }}
+        gcloud compute url-maps add-path-matcher ${{ env.GCLOUD_LB_NAME }} --path-matcher-name=${{ env.TARGET_BUCKET }}-matcher --new-hosts ${{ env.TARGET_DOMAIN }} --default-backend-bucket=${{ env.TARGET_BUCKET }}-backend
+
+    - name: Purge exist files
+      if: ${{ github.event.action == 'synchronize' }}
+      run: |
+        yes | gcloud components install alpha
+        gcloud alpha storage rm gs://${{ env.TARGET_BUCKET }}/**
+
+    - name: Upload files
+      uses: google-github-actions/upload-cloud-storage@v0.5.0
+      with:
+        path: './src/static'
+        destination: ${{ env.TARGET_BUCKET }}
+        parent: false
+        headers: |-
+          cache-control: no-cache

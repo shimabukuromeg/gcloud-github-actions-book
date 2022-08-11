@@ -1,0 +1,56 @@
+name: Delete deployed resources
+on:
+  pull_request:
+    types: ['closed']
+jobs:
+  main:
+    permissions:
+      id-token: 'write'
+    runs-on: ubuntu-latest
+    env:
+      GCLOUD_PROJECT_ID: '（プロジェクトID）'
+      GCLOUD_WORKLOAD_IDENTITY: '（Workload Identity 連携）'
+      GCLOUD_LB_NAME: 'github-books-lb'
+      BASE_BUCKET: '（加工ドメイン名）'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        path: './src'
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Get branch name
+      id: branch-name
+      uses: tj-actions/branch-names@v5
+
+    - name: Set bucket name
+      run: echo 'TARGET_BUCKET=${{ steps.branch-name.outputs.current_branch }}-${{ env.BASE_BUCKET }}' >> $GITHUB_ENV
+
+    - id: auth
+      name: Set up GoogleCloud Authorization
+      uses: google-github-actions/auth@v0
+      with:
+        token_format: 'access_token'
+        workload_identity_provider: ${{ env.GCLOUD_WORKLOAD_IDENTITY }}
+        service_account: 'github-actions@${{ env.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com'
+        access_token_lifetime: '300s'
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v0
+
+    - name: Backend Buckets and URL maps
+      run: |
+        gcloud compute url-maps remove-path-matcher ${{ env.GCLOUD_LB_NAME }} --path-matcher-name=${{ env.TARGET_BUCKET }}-matcher
+        gcloud compute backend-buckets delete ${{ env.TARGET_BUCKET }}-backend
+
+    - name: Purge exist files
+      run: |
+        yes | gcloud components install alpha
+        gcloud alpha storage rm gs://${{ env.TARGET_BUCKET }}/**
+
+    - name: Delete bucket
+      run: |
+        curl --request DELETE \
+          'https://storage.googleapis.com/storage/v1/b/${{ env.TARGET_BUCKET }}' \
+          --header 'Authorization: Bearer ${{ steps.auth.outputs.access_token }}' \
+          --header 'Content-Type: application/json'

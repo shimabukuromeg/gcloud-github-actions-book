@@ -1,0 +1,56 @@
+name: Publish to Cloud Run
+on:
+  pull_request:
+    types: ['opened', 'reopened', 'synchronize']
+jobs:
+  main:
+    permissions:
+      id-token: 'write'
+      contents: 'read'
+    runs-on: ubuntu-latest
+    env:
+      GCLOUD_PROJECT_ID: '（プロジェクトID）'
+      GCLOUD_WORKLOAD_IDENTITY: '（Workload Identity 連携）'
+      GCLOUD_REGION: 'asia-northeast1'
+      CLOUD_ARTIFACT_REGISTRY: '（Artifact Registry リポジトリー）'
+      DOCKER_IMAGE: 'gh-book-image'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+        path: './src'
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Get branch name
+      id: branch-name
+      uses: tj-actions/branch-names@v5
+
+    - name: Set docker image tag
+      run: echo 'TARGET_DOCKER_IMAGE_TAG=${{ env.CLOUD_ARTIFACT_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ steps.branch-name.outputs.current_branch }}' >> $GITHUB_ENV
+
+    - id: auth
+      name: Set up GoogleCloud Authorization
+      uses: google-github-actions/auth@v0
+      with:
+        token_format: 'access_token'
+        workload_identity_provider: ${{ env.GCLOUD_WORKLOAD_IDENTITY }}
+        service_account: 'github-actions@${{ env.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com'
+        access_token_lifetime: '300s'
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v0
+
+    - name: Build docker image
+      run: |
+        cd ./src/dynamic
+        gcloud builds submit --config=cloudbuild.yaml --substitutions=TAG_NAME=${{ env.TARGET_DOCKER_IMAGE_TAG }}
+
+    - name: Deploy cloud run
+      if: ${{ github.event.action != 'synchronize' }}
+      run: |
+        gcloud run deploy ${{ steps.branch-name.outputs.current_branch }} --image=${{ env.TARGET_DOCKER_IMAGE_TAG }} --region=${{ env.GCLOUD_REGION }} --allow-unauthenticated --service-account=firestore-user@${{ env.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com
+
+    - name: Update cloud run
+      if: ${{ github.event.action == 'synchronize' }}
+      run: |
+        gcloud run services update ${{ steps.branch-name.outputs.current_branch }} --image=${{ env.TARGET_DOCKER_IMAGE_TAG }} --region=${{ env.GCLOUD_REGION }}

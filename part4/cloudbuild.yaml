@@ -1,0 +1,6 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [ 'build', '-t', '$TAG_NAME', '.' ]
+images:
+- '$TAG_NAME'
+logsBucket: 'gs://（ログバケット）'

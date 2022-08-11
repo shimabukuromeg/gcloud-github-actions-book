@@ -1,0 +1,26 @@
+[req]
+default_bits                = 2048
+req_extensions              = extension_requirements
+distinguished_name          = dn_requirements
+
+[extension_requirements]
+basicConstraints            = CA:FALSE
+keyUsage                    = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName              = @sans_list
+
+[dn_requirements]
+countryName                 = Country Name (2 letter code)
+countryName_default         = JP
+stateOrProvinceName         = State or Province Name (full name)
+stateOrProvinceName_default = Tokyo
+localityName                = Locality Name (eg, city)
+localityName_default        = myCity
+0.organizationName          = Organization Name (eg, company)
+0.organizationName_default  = myCompany
+commonName                  = Common Name (e.g. server FQDN or YOUR name)
+commonName_default          = *.（ドメイン）
+
+[sans_list]
+DNS.1                      = *.storage.（ドメイン）
+DNS.2                      = *.run.（ドメイン）
+DNS.3                      = *.gke.（ドメイン）

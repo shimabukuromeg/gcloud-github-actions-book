@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: BRANCH_NAME-ingress
+spec:
+  tls:
+  - secretName: domain-ssl
+  rules:
+  - host: DOMAIN_NAME
+    http:
+      paths:
+      - path: "/"
+        backend:
+          service:
+            name: BRANCH_NAME-service
+            port:
+              number: 8080
+        pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: BRANCH_NAME-service
+spec:
+  type: NodePort
+  selector:
+    app: BRANCH_NAME
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: BRANCH_NAME-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: BRANCH_NAME
+  template:
+    metadata:
+      labels:
+        app: BRANCH_NAME
+    spec:
+      containers:
+        - name: BRANCH_NAME-app
+          image: DEPLOY_IMAGE
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 0.25
+              memory: 512Mi
+          ports:
+          - containerPort: 8080
+          env:
+          - name: PORT
+            value: "8080"
+          - name: SERVICE_NAME
+            value: BRANCH_NAME
+      serviceAccountName: firestore-user-identity
